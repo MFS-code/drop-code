@@ -16,6 +16,7 @@ private enum LauncherPreset: String, CaseIterable {
     case openCode = "OpenCode"
     case codex = "Codex"
     case claude = "Claude"
+    case cursor = "Cursor Agent"
     case custom = "Custom"
 
     var command: String? {
@@ -23,6 +24,7 @@ private enum LauncherPreset: String, CaseIterable {
         case .openCode: "opencode"
         case .codex: "codex"
         case .claude: "claude"
+        case .cursor: "agent"
         case .custom: nil
         }
     }

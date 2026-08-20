@@ -10,7 +10,7 @@ Ghostty.app is not required.
 
 - Tap `Control+Command` to toggle the panel.
 - Hold `Control+Command` to show it until you release the keys.
-- Launch OpenCode, Codex, Claude, or any custom shell command.
+- Launch OpenCode, Codex, Claude, Cursor Agent, or any custom shell command.
 - Adjust panel height and window opacity from the menu-bar settings.
 - Keep the colors and theme configured by the launched CLI.
 
