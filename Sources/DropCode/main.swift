@@ -257,7 +257,21 @@ final class DropPanelController: NSObject {
             notificationController?.requestAuthorization()
         }
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+
         rebuildTerminal()
+    }
+
+    /// Displays were added, removed, or rearranged (including closing the lid
+    /// or unplugging an external monitor). Re-anchor the panel to a screen
+    /// that still exists so it never ends up stranded off-screen.
+    @objc private func screenParametersDidChange(_ notification: Notification) {
+        updatePanelGeometry()
     }
 
     func toggleLatched() {
