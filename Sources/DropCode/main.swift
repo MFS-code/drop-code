@@ -408,9 +408,60 @@ final class DropPanelController: NSObject {
 
                 self.panel.orderOut(nil)
                 self.terminalView?.setSurfaceVisible(false)
-                self.previousApplication?.activate(options: [.activateIgnoringOtherApps])
-                self.previousApplication = nil
+                self.restoreFocusAfterHiding()
             }
+        }
+    }
+
+    /// Hands focus back to whatever the user was working in. The app that was
+    /// frontmost when the panel opened is preferred, but only while it still
+    /// has a window on the current Space; activating an app whose windows are
+    /// on another desktop makes macOS switch to that desktop, which is
+    /// disorienting when the panel was opened on one desktop and dismissed on
+    /// another. Otherwise the owner of the topmost visible window is used.
+    private func restoreFocusAfterHiding() {
+        let previous = previousApplication
+        previousApplication = nil
+
+        let onScreenWindows = Self.onScreenApplicationWindows()
+        if let previous,
+           !previous.isTerminated,
+           onScreenWindows.contains(where: { $0.ownerPID == previous.processIdentifier })
+        {
+            previous.activate(options: [.activateIgnoringOtherApps])
+            return
+        }
+
+        if let topmost = onScreenWindows.first,
+           let application = NSRunningApplication(processIdentifier: topmost.ownerPID)
+        {
+            application.activate(options: [.activateIgnoringOtherApps])
+        }
+    }
+
+    private struct OnScreenWindow {
+        let ownerPID: pid_t
+        let bounds: CGRect
+    }
+
+    /// Normal (layer 0) windows visible on the current Space, front to back,
+    /// excluding DropCode's own windows.
+    private static func onScreenApplicationWindows() -> [OnScreenWindow] {
+        guard let windowInfo = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else { return [] }
+
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        return windowInfo.compactMap { info in
+            guard let ownerPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  ownerPID != ownPID,
+                  (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let boundsDictionary = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary),
+                  bounds.width > 1, bounds.height > 1
+            else { return nil }
+            return OnScreenWindow(ownerPID: ownerPID, bounds: bounds)
         }
     }
 
@@ -491,18 +542,12 @@ final class DropPanelController: NSObject {
     }
 
     private var targetScreen: NSScreen {
-        if let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier,
-           let windowInfo = CGWindowListCopyWindowInfo(
-               [.optionOnScreenOnly, .excludeDesktopElements],
-               kCGNullWindowID
-           ) as? [[String: Any]],
-           let frontWindow = windowInfo.first(where: {
-               ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
-                   == frontmostPID
-                   && ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == 0
-           }),
-           let boundsDictionary = frontWindow[kCGWindowBounds as String] as? NSDictionary,
-           let windowBounds = CGRect(dictionaryRepresentation: boundsDictionary),
+        let windows = Self.onScreenApplicationWindows()
+        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let referenceWindow = windows.first { $0.ownerPID == frontmostPID }
+            ?? windows.first
+
+        if let windowBounds = referenceWindow?.bounds,
            let screen = NSScreen.screens.max(by: {
                Self.intersectionArea(of: $0, with: windowBounds)
                    < Self.intersectionArea(of: $1, with: windowBounds)
