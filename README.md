@@ -32,7 +32,16 @@ Requires macOS 13 or newer, Xcode, and your chosen agent CLI on `PATH`.
 open .build/DropCode.app
 ```
 
-Builds are ad-hoc signed by default. To use an Apple signing identity:
+To build, copy the app to `/Applications`, and relaunch it in one step:
+
+```sh
+./scripts/install-app.sh
+```
+
+Builds are ad-hoc signed by default, so macOS treats every rebuild as a new
+app and resets its permissions (Accessibility, notifications). The
+`Control+Command` gesture keeps working without Accessibility access. To keep
+permissions across builds, use an Apple signing identity:
 
 ```sh
 SIGNING_IDENTITY="Apple Development: Your Name (XXXXXXXXXX)" ./scripts/build-app.sh
