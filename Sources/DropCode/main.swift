@@ -161,7 +161,7 @@ final class DesktopNotificationController: NSObject,
 
 @MainActor
 final class DropPanelController: NSObject {
-    private let panel: DropPanel
+    private var panel: DropPanel
     private let clipView: PanelClipView
     private let terminalContainer: TerminalContainerView
     private let terminalController: TerminalController
@@ -212,12 +212,7 @@ final class DropPanelController: NSObject {
             heightRatio: heightRatio,
             widthRatio: widthRatio
         )
-        panel = DropPanel(
-            contentRect: initialFrame,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
+        panel = Self.makePanel(frame: initialFrame, opacity: opacity)
         terminalContainer = TerminalContainerView(
             frame: NSRect(origin: .zero, size: initialFrame.size)
         )
@@ -232,22 +227,6 @@ final class DropPanelController: NSObject {
 
         super.init()
 
-        panel.backgroundColor = .clear
-        panel.collectionBehavior = [
-            .canJoinAllSpaces,
-            .fullScreenAuxiliary,
-            .ignoresCycle,
-            .stationary,
-        ]
-        panel.hasShadow = false
-        panel.hidesOnDeactivate = false
-        panel.isMovable = false
-        panel.isOpaque = false
-        panel.alphaValue = opacity
-        panel.isReleasedWhenClosed = false
-        panel.level = NSWindow.Level(
-            rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 1
-        )
         clipView.autoresizingMask = [.width, .height]
         terminalContainer.autoresizingMask = [.width, .height]
         clipView.addSubview(terminalContainer)
@@ -272,6 +251,71 @@ final class DropPanelController: NSObject {
     /// that still exists so it never ends up stranded off-screen.
     @objc private func screenParametersDidChange(_ notification: Notification) {
         updatePanelGeometry()
+    }
+
+    private static func makePanel(frame: NSRect, opacity: Double) -> DropPanel {
+        let panel = DropPanel(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.backgroundColor = .clear
+        panel.collectionBehavior = [
+            .canJoinAllSpaces,
+            .fullScreenAuxiliary,
+            .ignoresCycle,
+            .stationary,
+        ]
+        panel.hasShadow = false
+        panel.hidesOnDeactivate = false
+        panel.isMovable = false
+        panel.isOpaque = false
+        panel.alphaValue = opacity
+        panel.isReleasedWhenClosed = false
+        panel.level = NSWindow.Level(
+            rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 1
+        )
+        return panel
+    }
+
+    /// Whether the window server is actually drawing the panel. After a
+    /// sleep/wake or display reconfiguration the panel can end up in a state
+    /// where AppKit accepts `orderFront` but the window never comes on screen,
+    /// and it stays that way until the window is recreated.
+    private var panelIsOnScreen: Bool {
+        guard let windowInfo = CGWindowListCopyWindowInfo(
+            .optionOnScreenOnly,
+            kCGNullWindowID
+        ) as? [[String: Any]] else { return true }
+        let windowNumber = panel.windowNumber
+        return windowInfo.contains {
+            ($0[kCGWindowNumber as String] as? NSNumber)?.intValue == windowNumber
+        }
+    }
+
+    /// Replaces the panel window while keeping the live terminal view, so a
+    /// running agent session survives the recovery.
+    private func rebuildPanel() {
+        let stale = panel
+        let replacement = Self.makePanel(frame: stale.frame, opacity: backgroundOpacity)
+        replacement.contentView = clipView
+        panel = replacement
+        stale.close()
+        NSLog("DropCode recreated its panel window after it failed to appear")
+    }
+
+    private func verifyPanelAppeared(generation: Int) {
+        guard isVisible, animationGeneration == generation, !panelIsOnScreen else {
+            return
+        }
+        rebuildPanel()
+        updatePanelGeometry()
+        terminalView?.setSurfaceVisible(true)
+        panel.orderFrontRegardless()
+        panel.makeKey()
+        NSApp.activate(ignoringOtherApps: true)
+        focusTerminal()
     }
 
     func toggleLatched() {
@@ -406,6 +450,9 @@ final class DropPanelController: NSObject {
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.isVisible else { return }
                 self.focusTerminal()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.verifyPanelAppeared(generation: generation)
             }
         } else {
             animateContent(
